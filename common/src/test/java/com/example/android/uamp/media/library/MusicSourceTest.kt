@@ -150,7 +150,7 @@ class MusicSourceTest {
 
 class TestMusicSource(private val music: List<MediaMetadataCompat>
 ) : AbstractMusicSource(), Iterable<MediaMetadataCompat> by music {
-    override suspend fun load() = Unit
+    override fun load() = Unit
 
     fun prepare() {
         state = STATE_INITIALIZED

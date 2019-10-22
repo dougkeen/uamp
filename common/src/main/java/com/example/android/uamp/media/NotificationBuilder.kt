@@ -32,6 +32,7 @@ import android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY
 import android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_NEXT
 import android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
 import android.support.v4.media.session.PlaybackStateCompat.ACTION_STOP
+import android.util.Log
 import com.example.android.uamp.media.extensions.isPlayEnabled
 import com.example.android.uamp.media.extensions.isPlaying
 import com.example.android.uamp.media.extensions.isSkipToNextEnabled
@@ -92,12 +93,22 @@ class NotificationBuilder(private val context: Context) {
             builder.addAction(skipToNextAction)
         }
 
+        Log.i("Issue142909875", "SESSION TOKEN: ${sessionToken}, MEDIA ID: ${description.mediaId}")
+
         val mediaStyle = MediaStyle()
                 .setCancelButtonIntent(stopPendingIntent)
                 .setMediaSession(sessionToken)
                 .setShowActionsInCompactView(playPauseIndex)
                 .setShowCancelButton(true)
 
+        // Stash last played item in shared prefs
+        description.mediaId?.let {
+            val sharedPref = context.getSharedPreferences("bugRepro", Context.MODE_PRIVATE);
+            with(sharedPref.edit()) {
+                putString("mediaId", it)
+                commit()
+            }
+        }
         return builder.setContentIntent(controller.sessionActivity)
                 .setContentText(description.subtitle)
                 .setContentTitle(description.title)

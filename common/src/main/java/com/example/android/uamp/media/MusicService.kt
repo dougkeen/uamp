@@ -16,6 +16,7 @@
 
 package com.example.android.uamp.media
 
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -33,6 +34,7 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.media.MediaBrowserServiceCompat
@@ -96,12 +98,12 @@ open class MusicService : MediaBrowserServiceCompat() {
     private var isForegroundService = false
 
     private val remoteJsonSource: Uri =
-        Uri.parse("https://storage.googleapis.com/uamp/catalog.json")
+            Uri.parse("https://storage.googleapis.com/uamp/catalog.json")
 
     private val uAmpAudioAttributes = AudioAttributes.Builder()
-        .setContentType(C.CONTENT_TYPE_MUSIC)
-        .setUsage(C.USAGE_MEDIA)
-        .build()
+            .setContentType(C.CONTENT_TYPE_MUSIC)
+            .setUsage(C.USAGE_MEDIA)
+            .build()
 
     /**
      * Configure ExoPlayer to handle audio focus for us.
@@ -119,16 +121,16 @@ open class MusicService : MediaBrowserServiceCompat() {
 
         // Build a PendingIntent that can be used to launch the UI.
         val sessionActivityPendingIntent =
-            packageManager?.getLaunchIntentForPackage(packageName)?.let { sessionIntent ->
-                PendingIntent.getActivity(this, 0, sessionIntent, 0)
-            }
+                packageManager?.getLaunchIntentForPackage(packageName)?.let { sessionIntent ->
+                    PendingIntent.getActivity(this, 0, sessionIntent, 0)
+                }
 
         // Create a new MediaSession.
         mediaSession = MediaSessionCompat(this, "MusicService")
-            .apply {
-                setSessionActivity(sessionActivityPendingIntent)
-                isActive = true
-            }
+                .apply {
+                    setSessionActivity(sessionActivityPendingIntent)
+                    isActive = true
+                }
 
         /**
          * In order for [MediaBrowserCompat.ConnectionCallback.onConnected] to be called,
@@ -151,27 +153,28 @@ open class MusicService : MediaBrowserServiceCompat() {
         notificationManager = NotificationManagerCompat.from(this)
 
         becomingNoisyReceiver =
-            BecomingNoisyReceiver(context = this, sessionToken = mediaSession.sessionToken)
+                BecomingNoisyReceiver(context = this, sessionToken = mediaSession.sessionToken)
 
-        // The media library is built from a remote JSON file. We'll create the source here,
-        // and then use a suspend function to perform the download off the main thread.
         mediaSource = JsonSource(context = this, source = remoteJsonSource)
-        serviceScope.launch {
-            mediaSource.load()
-        }
+
+        mediaSource.load()
+
+        val notificationManager = this.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val activeNotifications = notificationManager.activeNotifications
+        val sharedPreferences = this.getSharedPreferences("bugRepro", Context.MODE_PRIVATE)
 
         // ExoPlayer will manage the MediaSession for us.
         mediaSessionConnector = MediaSessionConnector(mediaSession).also { connector ->
             // Produces DataSource instances through which media data is loaded.
             val dataSourceFactory = DefaultDataSourceFactory(
-                this, Util.getUserAgent(this, UAMP_USER_AGENT), null
+                    this, Util.getUserAgent(this, UAMP_USER_AGENT), null
             )
 
             // Create the PlaybackPreparer of the media session connector.
             val playbackPreparer = UampPlaybackPreparer(
-                mediaSource,
-                exoPlayer,
-                dataSourceFactory
+                    mediaSource,
+                    exoPlayer,
+                    dataSourceFactory
             )
 
             connector.setPlayer(exoPlayer)
@@ -180,6 +183,19 @@ open class MusicService : MediaBrowserServiceCompat() {
         }
 
         packageValidator = PackageValidator(this, R.xml.allowed_media_browser_callers)
+
+        if (activeNotifications.isNotEmpty()) {
+            val mediaIdToLoad = sharedPreferences.getString("mediaId", null)
+            mediaIdToLoad?.let {
+                Log.i("Issue142909875", "RESTORING PLAYBACK OF ${it}")
+                mediaController.transportControls.playFromMediaId(it, null)
+                with(sharedPreferences.edit()) {
+                    this.clear()
+                    this.commit()
+                }
+            }
+        }
+
     }
 
     /**
@@ -187,18 +203,18 @@ open class MusicService : MediaBrowserServiceCompat() {
      * The choice to do this is app specific. Some apps stop playback, while others allow playback
      * to continue and allow uses to stop it with the notification.
      */
-    override fun onTaskRemoved(rootIntent: Intent) {
-        super.onTaskRemoved(rootIntent)
-
-        /**
-         * By stopping playback, the player will transition to [Player.STATE_IDLE]. This will
-         * cause a state change in the MediaSession, and (most importantly) call
-         * [MediaControllerCallback.onPlaybackStateChanged]. Because the playback state will
-         * be reported as [PlaybackStateCompat.STATE_NONE], the service will first remove
-         * itself as a foreground service, and will then call [stopSelf].
-         */
-        exoPlayer.stop(true)
-    }
+//    override fun onTaskRemoved(rootIntent: Intent) {
+//        super.onTaskRemoved(rootIntent)
+//
+//        /**
+//         * By stopping playback, the player will transition to [Player.STATE_IDLE]. This will
+//         * cause a state change in the MediaSession, and (most importantly) call
+//         * [MediaControllerCallback.onPlaybackStateChanged]. Because the playback state will
+//         * be reported as [PlaybackStateCompat.STATE_NONE], the service will first remove
+//         * itself as a foreground service, and will then call [stopSelf].
+//         */
+//         exoPlayer.stop(true)
+//    }
 
     override fun onDestroy() {
         mediaSession.run {
@@ -215,9 +231,9 @@ open class MusicService : MediaBrowserServiceCompat() {
      * [MediaItem]s to browse/play.
      */
     override fun onGetRoot(
-        clientPackageName: String,
-        clientUid: Int,
-        rootHints: Bundle?
+            clientPackageName: String,
+            clientUid: Int,
+            rootHints: Bundle?
     ): BrowserRoot? {
 
         /*
@@ -227,8 +243,8 @@ open class MusicService : MediaBrowserServiceCompat() {
         val isKnownCaller = packageValidator.isKnownCaller(clientPackageName, clientUid)
         val rootExtras = Bundle().apply {
             putBoolean(
-                MEDIA_SEARCH_SUPPORTED,
-                isKnownCaller || browseTree.searchableByUnknownCaller
+                    MEDIA_SEARCH_SUPPORTED,
+                    isKnownCaller || browseTree.searchableByUnknownCaller
             )
             putBoolean(CONTENT_STYLE_SUPPORTED, true)
             putInt(CONTENT_STYLE_BROWSABLE_HINT, CONTENT_STYLE_GRID)
@@ -258,8 +274,8 @@ open class MusicService : MediaBrowserServiceCompat() {
      * how this is build/more details about the relationships.
      */
     override fun onLoadChildren(
-        parentMediaId: String,
-        result: Result<List<MediaItem>>
+            parentMediaId: String,
+            result: Result<List<MediaItem>>
     ) {
 
         // If the media source is ready, the results will be set synchronously here.
@@ -290,17 +306,17 @@ open class MusicService : MediaBrowserServiceCompat() {
      * Returns a list of [MediaItem]s that match the given search query
      */
     override fun onSearch(
-        query: String,
-        extras: Bundle?,
-        result: Result<List<MediaItem>>
+            query: String,
+            extras: Bundle?,
+            result: Result<List<MediaItem>>
     ) {
 
         val resultsSent = mediaSource.whenReady { successfullyInitialized ->
             if (successfullyInitialized) {
                 val resultsList = mediaSource.search(query, extras ?: Bundle.EMPTY)
-                    .map { mediaMetadata ->
-                        MediaItem(mediaMetadata.description, mediaMetadata.flag)
-                    }
+                        .map { mediaMetadata ->
+                            MediaItem(mediaMetadata.description, mediaMetadata.flag)
+                        }
                 result.sendResult(resultsList)
             }
         }
@@ -352,6 +368,7 @@ open class MusicService : MediaBrowserServiceCompat() {
 
             // Skip building a notification when state is "none" and metadata is null.
             val notification = if (mediaController.metadata != null
+                    && mediaController.metadata?.description?.mediaId != null
                     && updatedState != PlaybackStateCompat.STATE_NONE) {
                 notificationBuilder.buildNotification(mediaSession.sessionToken)
             } else {
@@ -373,8 +390,8 @@ open class MusicService : MediaBrowserServiceCompat() {
 
                         if (!isForegroundService) {
                             ContextCompat.startForegroundService(
-                                applicationContext,
-                                Intent(applicationContext, this@MusicService.javaClass)
+                                    applicationContext,
+                                    Intent(applicationContext, this@MusicService.javaClass)
                             )
                             startForeground(NOW_PLAYING_NOTIFICATION, notification)
                             isForegroundService = true
@@ -385,7 +402,7 @@ open class MusicService : MediaBrowserServiceCompat() {
                     becomingNoisyReceiver.unregister()
 
                     if (isForegroundService) {
-                        stopForeground(false)
+                        stopForeground(Service.STOP_FOREGROUND_DETACH)
                         isForegroundService = false
 
                         // If playback has ended, also stop the service.
@@ -410,12 +427,12 @@ open class MusicService : MediaBrowserServiceCompat() {
  * extension to call [MediaSessionCompat.setMetadata].
  */
 private class UampQueueNavigator(
-    mediaSession: MediaSessionCompat
+        mediaSession: MediaSessionCompat
 ) : TimelineQueueNavigator(mediaSession) {
     private val window = Timeline.Window()
     override fun getMediaDescription(player: Player, windowIndex: Int): MediaDescriptionCompat =
-        player.currentTimeline
-            .getWindow(windowIndex, window, true).tag as MediaDescriptionCompat
+            player.currentTimeline
+                    .getWindow(windowIndex, window, true).tag as MediaDescriptionCompat
 }
 
 /**
@@ -423,8 +440,8 @@ private class UampQueueNavigator(
  * will otherwise cause playback to become "noisy").
  */
 private class BecomingNoisyReceiver(
-    private val context: Context,
-    sessionToken: MediaSessionCompat.Token
+        private val context: Context,
+        sessionToken: MediaSessionCompat.Token
 ) : BroadcastReceiver() {
 
     private val noisyIntentFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)

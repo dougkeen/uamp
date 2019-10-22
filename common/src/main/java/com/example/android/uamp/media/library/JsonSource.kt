@@ -21,6 +21,7 @@ import android.net.Uri
 import android.support.v4.media.MediaBrowserCompat.MediaItem
 import android.support.v4.media.MediaDescriptionCompat.STATUS_NOT_DOWNLOADED
 import android.support.v4.media.MediaMetadataCompat
+import android.util.Log
 import com.bumptech.glide.Glide
 import com.bumptech.glide.RequestManager
 import com.bumptech.glide.load.engine.DiskCacheStrategy
@@ -62,15 +63,17 @@ class JsonSource(context: Context, private val source: Uri) : AbstractMusicSourc
 
     private var catalog: List<MediaMetadataCompat> = emptyList()
     private val glide: RequestManager
+    private val ctx: Context
 
     init {
         state = STATE_INITIALIZING
         glide = Glide.with(context)
+        ctx = context
     }
 
     override fun iterator(): Iterator<MediaMetadataCompat> = catalog.iterator()
 
-    override suspend fun load() {
+    override fun load() {
         updateCatalog(source)?.let { updatedCatalog ->
             catalog = updatedCatalog
             state = STATE_INITIALIZED
@@ -84,44 +87,42 @@ class JsonSource(context: Context, private val source: Uri) : AbstractMusicSourc
      * Function to connect to a remote URI and download/process the JSON file that corresponds to
      * [MediaMetadataCompat] objects.
      */
-    private suspend fun updateCatalog(catalogUri: Uri): List<MediaMetadataCompat>? {
-        return withContext(Dispatchers.IO) {
-            val musicCat = try {
-                downloadJson(catalogUri)
-            } catch (ioException: IOException) {
-                return@withContext null
+    private fun updateCatalog(catalogUri: Uri): List<MediaMetadataCompat>? {
+        val musicCat = try {
+            downloadJson(catalogUri)
+        } catch (ioException: IOException) {
+            return null
+        }
+
+        // Get the base URI to fix up relative references later.
+        val baseUri = catalogUri.toString().removeSuffix(catalogUri.lastPathSegment ?: "")
+
+        return musicCat.music.map { song ->
+            // The JSON may have paths that are relative to the source of the JSON
+            // itself. We need to fix them up here to turn them into absolute paths.
+            catalogUri.scheme?.let { scheme ->
+                if (!song.source.startsWith(scheme)) {
+                    song.source = baseUri + song.source
+                }
+                if (!song.image.startsWith(scheme)) {
+                    song.image = baseUri + song.image
+                }
             }
 
-            // Get the base URI to fix up relative references later.
-            val baseUri = catalogUri.toString().removeSuffix(catalogUri.lastPathSegment ?: "")
+            // Block on downloading artwork.
+//            val art = glide.applyDefaultRequestOptions(glideOptions)
+//                    .asBitmap()
+//                    .load(song.image)
+//                    .submit(NOTIFICATION_LARGE_ICON_SIZE, NOTIFICATION_LARGE_ICON_SIZE)
+//                    .get()
 
-            musicCat.music.map { song ->
-                // The JSON may have paths that are relative to the source of the JSON
-                // itself. We need to fix them up here to turn them into absolute paths.
-                catalogUri.scheme?.let { scheme ->
-                    if (!song.source.startsWith(scheme)) {
-                        song.source = baseUri + song.source
-                    }
-                    if (!song.image.startsWith(scheme)) {
-                        song.image = baseUri + song.image
-                    }
-                }
-
-                // Block on downloading artwork.
-                val art = glide.applyDefaultRequestOptions(glideOptions)
-                    .asBitmap()
-                    .load(song.image)
-                    .submit(NOTIFICATION_LARGE_ICON_SIZE, NOTIFICATION_LARGE_ICON_SIZE)
-                    .get()
-
-                MediaMetadataCompat.Builder()
+            MediaMetadataCompat.Builder()
                     .from(song)
-                    .apply {
-                        albumArt = art
-                    }
+//                    .apply {
+//                        albumArt = art
+//                    }
                     .build()
-            }.toList()
-        }
+        }.toList()
     }
 
 
@@ -133,8 +134,8 @@ class JsonSource(context: Context, private val source: Uri) : AbstractMusicSourc
      */
     @Throws(IOException::class)
     private fun downloadJson(catalogUri: Uri): JsonCatalog {
-        val catalogConn = URL(catalogUri.toString())
-        val reader = BufferedReader(InputStreamReader(catalogConn.openStream()))
+//        val catalogConn = URL(catalogUri.toString())
+        val reader = BufferedReader(InputStreamReader(ctx.resources.openRawResource(R.raw.catalog)))
         return Gson().fromJson<JsonCatalog>(reader, JsonCatalog::class.java)
     }
 }
@@ -231,5 +232,5 @@ class JsonMusic {
 private const val NOTIFICATION_LARGE_ICON_SIZE = 144 // px
 
 private val glideOptions = RequestOptions()
-    .fallback(R.drawable.default_art)
-    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+        .fallback(R.drawable.default_art)
+        .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
